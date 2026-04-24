@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from models import CreateMonitorRequest, MonitorStatus
 from store import Monitor, monitors
@@ -15,24 +16,24 @@ app = FastAPI(title="Pulse Check API Watchdog Sentinel")
 
 
 async def run_countdown(monitor_id: str):
-    # wait for the timeout duration — if a heartbeat cancels this task we never reach the end
+    # wait for the timeout, heartbeat will cancel this task before it finishes
     monitor = monitors.get(monitor_id)
     if not monitor:
         return
 
     await asyncio.sleep(monitor.timeout)
 
-    # re-fetch in case state changed while we were sleeping
+    # re-fetch in case state changed while sleeping
     monitor = monitors.get(monitor_id)
     if not monitor or monitor.status == MonitorStatus.paused:
         return
 
-    # timer expired naturally — device is considered down
+    # made it here means no heartbeat came in, device is down
     monitor.status = MonitorStatus.down
     logger.critical(f"Monitor '{monitor_id}' timed out.")
 
 
-@app.post("/monitors", status_code=201) #201 status code: indicates that the request has been successfully fulfilled
+@app.post("/monitors", status_code=201)# 201 status code:indicates that the  request is successfully fulfilled
 async def register_monitor(body: CreateMonitorRequest):
     if body.id in monitors:
         raise HTTPException(
@@ -43,12 +44,32 @@ async def register_monitor(body: CreateMonitorRequest):
     monitor = Monitor(id=body.id, timeout=body.timeout, alert_email=body.alert_email)
     monitors[body.id] = monitor
 
-    # kick off the countdown as a background task
+    # start the countdown in the background
     monitor.timer_task = asyncio.create_task(run_countdown(body.id))
     logger.info(f"Monitor '{body.id}' registered. Countdown: {body.timeout}s.")
 
     return {
         "message": f"Monitor '{body.id}' registered. Countdown started for {body.timeout}s.",
         "id": body.id,
+        "status": monitor.status,
+    }
+
+
+@app.post("/monitors/{id}/heartbeat")
+async def heartbeat(id: str):
+    monitor = monitors.get(id)
+    if not monitor:
+        raise HTTPException(status_code=404, detail=f"Monitor '{id}' not found.")
+
+    # cancel the old timer and restart it fresh
+    monitor.cancel_tasks()
+    monitor.status = MonitorStatus.active
+    monitor.last_heartbeat = datetime.utcnow()
+    monitor.timer_task = asyncio.create_task(run_countdown(id))
+    logger.info(f"Heartbeat received for '{id}'. Timer reset to {monitor.timeout}s.")
+
+    return {
+        "message": f"Heartbeat received. Timer reset for {monitor.timeout}s.",
+        "id": id,
         "status": monitor.status,
     }
