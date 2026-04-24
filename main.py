@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
+from alerts import fire_initial_alert
 from models import CreateMonitorRequest, MonitorStatus
 from store import Monitor, monitors
 
@@ -28,12 +29,13 @@ async def run_countdown(monitor_id: str):
     if not monitor or monitor.status == MonitorStatus.paused:
         return
 
-    # made it here means no heartbeat came in, device is down
+    # no heartbeat came in, fire the alert
     monitor.status = MonitorStatus.down
-    logger.critical(f"Monitor '{monitor_id}' timed out.")
+    logger.critical(f"Monitor '{monitor_id}' timed out. Firing alert.")
+    fire_initial_alert(monitor_id, monitor.alert_email)
 
 
-@app.post("/monitors", status_code=201)# 201 status code:indicates that the  request is successfully fulfilled
+@app.post("/monitors", status_code=201) # 201 status code: indicates that the request is successfully fulfilled
 async def register_monitor(body: CreateMonitorRequest):
     if body.id in monitors:
         raise HTTPException(
