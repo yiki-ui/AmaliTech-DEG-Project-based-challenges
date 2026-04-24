@@ -75,3 +75,25 @@ async def heartbeat(id: str):
         "id": id,
         "status": monitor.status,
     }
+
+
+@app.post("/monitors/{id}/pause")
+async def pause_monitor(id: str):
+    monitor = monitors.get(id)
+    if not monitor:
+        raise HTTPException(status_code=404, detail=f"Monitor '{id}' not found.")
+
+    # no point pausing if already paused
+    if monitor.status == MonitorStatus.paused:
+        return {"message": f"Monitor '{id}' is already paused.", "id": id}
+
+    # stop the timer, no alerts will fire until heartbeat resumes it
+    monitor.cancel_tasks()
+    monitor.status = MonitorStatus.paused
+    logger.info(f"Monitor '{id}' paused.")
+
+    return {
+        "message": f"Monitor '{id}' paused. Send a heartbeat to resume.",
+        "id": id,
+        "status": monitor.status,
+    }
