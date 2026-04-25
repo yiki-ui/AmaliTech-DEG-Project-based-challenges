@@ -21,29 +21,31 @@ app = FastAPI(
 
 
 async def run_countdown(monitor_id: str):
-    # wait for the timeout, heartbeat will cancel this task before it finishes
-    monitor = monitors.get(monitor_id)
-    if not monitor:
-        return
+    try:
+        # wait for the timeout, heartbeat will cancel this task before it finishes
+        monitor = monitors.get(monitor_id)
+        if not monitor:
+            return
 
-    await asyncio.sleep(monitor.timeout)
+        await asyncio.sleep(monitor.timeout)
 
-    # re-fetch in case state changed while sleeping
-    monitor = monitors.get(monitor_id)
-    if not monitor or monitor.status == MonitorStatus.paused:
-        return
+        # re-fetch in case state changed while sleeping
+        monitor = monitors.get(monitor_id)
+        if not monitor or monitor.status == MonitorStatus.paused:
+            return
 
-    # no heartbeat came in, fire the alert
-    monitor.status = MonitorStatus.down
-    monitor.log_event("alert_fired")
-    logger.critical(f"Monitor '{monitor_id}' timed out. Firing alert.")
-    fire_initial_alert(monitor_id, monitor.alert_email)
+        # no heartbeat came in, fire the alert
+        monitor.status = MonitorStatus.down
+        monitor.log_event("alert_fired")
+        logger.critical(f"Monitor '{monitor_id}' timed out. Firing alert.")
+        fire_initial_alert(monitor_id, monitor.alert_email)
 
-    # start escalation — keeps re-alerting until device recovers
-    monitor.escalation_task = asyncio.create_task(
-        escalation_loop(monitor_id, monitor.alert_email)
-    )
-
+        # start escalation — keeps re-alerting until device recovers
+        monitor.escalation_task = asyncio.create_task(
+            escalation_loop(monitor_id, monitor.alert_email)
+        )
+    except Exception as e:
+        logger.error(f"run_countdown crashed: {e}")
 
 @app.post("/monitors", status_code=201) # 201 status code: indicates that the request is successfully fulfilled
 async def register_monitor(body: CreateMonitorRequest):
